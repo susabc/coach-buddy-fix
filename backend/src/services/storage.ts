@@ -25,6 +25,11 @@ function getContainerClient(): ContainerClient {
     config.storage.connectionString
   );
   containerClient = blobServiceClient.getContainerClient(config.storage.containerName);
+  
+  console.log(
+    'AZURE_STORAGE_CONNECTION_STRING:',
+    config.storage.connectionString
+  );
 
   return containerClient;
 }
