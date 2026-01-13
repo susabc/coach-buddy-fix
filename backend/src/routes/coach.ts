@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { queryAll, queryOne, execute, transformRows, transformRow } from '../db';
 import { authenticate, AuthenticatedRequest, requireCoach } from '../middleware/auth';
 import { asyncHandler, NotFoundError, BadRequestError, ForbiddenError } from '../middleware/errorHandler';
-import { sendEmail, generateCheckinReceivedEmail, generatePlanAssignedEmail } from '../services/email';
+import { sendEmail, generatePlanAssignedEmail, EmailOptions } from '../services/email';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const router = Router();
 
 // Get coach settings/profile
 router.get('/settings', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const profile = await queryOne(
+  const profile = await queryOne<Record<string, unknown>>(
     `SELECT cp.*, p.full_name, p.email, p.avatar_url, p.bio, p.phone
      FROM coach_profiles cp
      JOIN profiles p ON cp.user_id = p.user_id
@@ -89,7 +89,7 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
 
 // Get all clients for coach
 router.get('/clients', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const clients = await queryAll(
+  const clients = await queryAll<Record<string, unknown>>(
     `SELECT ccr.id as relationship_id, ccr.status, ccr.started_at, 
             p.user_id as client_id, p.full_name, p.email, p.avatar_url,
             cp.fitness_level, cp.current_weight_kg, cp.target_weight_kg,
@@ -121,7 +121,7 @@ router.get('/clients/:clientId', authenticate, requireCoach, asyncHandler(async 
     throw ForbiddenError('You are not coaching this client');
   }
 
-  const client = await queryOne(
+  const client = await queryOne<Record<string, unknown>>(
     `SELECT p.user_id as client_id, p.full_name, p.email, p.avatar_url, p.bio, p.phone,
             p.date_of_birth, p.gender,
             cp.fitness_level, cp.current_weight_kg, cp.target_weight_kg, cp.height_cm,
@@ -143,24 +143,24 @@ router.get('/clients/:clientId', authenticate, requireCoach, asyncHandler(async 
 
 // Get coach analytics
 router.get('/analytics', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const totalClients = await queryOne(
+  const totalClients = await queryOne<{ count: number }>(
     'SELECT COUNT(*) as count FROM coach_client_relationships WHERE coach_id = @coachId AND status = @status',
     { coachId: req.user!.id, status: 'active' }
   );
 
-  const pendingCheckins = await queryOne(
+  const pendingCheckins = await queryOne<{ count: number }>(
     `SELECT COUNT(*) as count FROM client_checkins cc 
      JOIN coach_client_relationships ccr ON cc.client_id = ccr.client_id 
      WHERE ccr.coach_id = @coachId AND cc.status = 'submitted'`,
     { coachId: req.user!.id }
   );
 
-  const pendingRequests = await queryOne(
+  const pendingRequests = await queryOne<{ count: number }>(
     'SELECT COUNT(*) as count FROM coaching_requests WHERE coach_id = @coachId AND status = @status',
     { coachId: req.user!.id, status: 'pending' }
   );
 
-  const activeAssignments = await queryOne(
+  const activeAssignments = await queryOne<{ count: number }>(
     `SELECT COUNT(*) as count FROM plan_assignments 
      WHERE coach_id = @coachId AND status = 'active'`,
     { coachId: req.user!.id }
@@ -207,7 +207,7 @@ router.get('/marketplace', asyncHandler(async (req: AuthenticatedRequest, res: R
     params.maxRate = parseFloat(max_rate as string);
   }
 
-  const coaches = await queryAll(
+  const coaches = await queryAll<Record<string, unknown>>(
     `SELECT cp.user_id, cp.specializations, cp.certifications, cp.experience_years,
             cp.hourly_rate, cp.currency, cp.rating, cp.total_reviews, cp.is_accepting_clients,
             p.full_name, p.avatar_url, p.bio
@@ -221,9 +221,9 @@ router.get('/marketplace', asyncHandler(async (req: AuthenticatedRequest, res: R
   transformRows(coaches, ['specializations', 'certifications']);
 
   // Filter by specialization after parsing (since it's stored as JSON)
-  let filteredCoaches = coaches;
+  let filteredCoaches: Record<string, unknown>[] = coaches;
   if (specialization) {
-    filteredCoaches = coaches.filter((c: Record<string, unknown>) => {
+    filteredCoaches = coaches.filter((c) => {
       const specs = c.specializations as string[];
       return specs && specs.includes(specialization as string);
     });
@@ -234,12 +234,12 @@ router.get('/marketplace', asyncHandler(async (req: AuthenticatedRequest, res: R
 
 // Get unique specializations
 router.get('/specializations', asyncHandler(async (_req, res: Response) => {
-  const coaches = await queryAll(
+  const coaches = await queryAll<Record<string, unknown>>(
     `SELECT DISTINCT specializations FROM coach_profiles WHERE specializations IS NOT NULL`
   );
 
   const allSpecs = new Set<string>();
-  coaches.forEach((c: Record<string, unknown>) => {
+  coaches.forEach((c) => {
     const specs = JSON.parse((c.specializations as string) || '[]');
     specs.forEach((s: string) => allSpecs.add(s));
   });
@@ -261,7 +261,7 @@ router.get('/requests', authenticate, requireCoach, asyncHandler(async (req: Aut
     params.status = status;
   }
 
-  const requests = await queryAll(
+  const requests = await queryAll<Record<string, unknown>>(
     `SELECT cr.*, p.full_name as client_name, p.email as client_email, p.avatar_url as client_avatar,
             cp.fitness_level, cp.fitness_goals
      FROM coaching_requests cr
@@ -278,7 +278,7 @@ router.get('/requests', authenticate, requireCoach, asyncHandler(async (req: Aut
 
 // Get my sent requests (as client)
 router.get('/requests/my', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const requests = await queryAll(
+  const requests = await queryAll<Record<string, unknown>>(
     `SELECT cr.*, p.full_name as coach_name, p.avatar_url as coach_avatar,
             cp.specializations, cp.hourly_rate, cp.currency
      FROM coaching_requests cr
@@ -454,7 +454,7 @@ router.get('/notes', authenticate, requireCoach, asyncHandler(async (req: Authen
     params.noteType = note_type;
   }
 
-  const notes = await queryAll(
+  const notes = await queryAll<Record<string, unknown>>(
     `SELECT n.*, p.full_name as client_name
      FROM coach_client_notes n
      JOIN profiles p ON n.client_id = p.user_id
@@ -471,7 +471,7 @@ router.get('/notes', authenticate, requireCoach, asyncHandler(async (req: Authen
 router.get('/clients/:clientId/notes', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { clientId } = req.params;
 
-  const notes = await queryAll(
+  const notes = await queryAll<Record<string, unknown>>(
     `SELECT * FROM coach_client_notes 
      WHERE coach_id = @coachId AND client_id = @clientId
      ORDER BY is_pinned DESC, created_at DESC`,
@@ -868,19 +868,19 @@ router.get('/clients/:clientId/workout-stats', authenticate, requireCoach, async
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - parseInt(days as string));
 
-  const totalWorkouts = await queryOne(
+  const totalWorkouts = await queryOne<{ count: number }>(
     `SELECT COUNT(*) as count FROM workout_logs 
      WHERE client_id = @clientId AND status = 'completed' AND workout_date >= @startDate`,
     { clientId, startDate: startDate.toISOString() }
   );
 
-  const avgDuration = await queryOne(
+  const avgDuration = await queryOne<{ avg: number }>(
     `SELECT AVG(duration_minutes) as avg FROM workout_logs 
      WHERE client_id = @clientId AND status = 'completed' AND workout_date >= @startDate`,
     { clientId, startDate: startDate.toISOString() }
   );
 
-  const avgEffort = await queryOne(
+  const avgEffort = await queryOne<{ avg: number }>(
     `SELECT AVG(perceived_effort) as avg FROM workout_logs 
      WHERE client_id = @clientId AND perceived_effort IS NOT NULL AND workout_date >= @startDate`,
     { clientId, startDate: startDate.toISOString() }

@@ -28,6 +28,7 @@ import favoritesRouter from './routes/favorites';
 import storageRouter from './routes/storage';
 import adminRouter from './routes/admin';
 import emailRouter from './routes/email';
+import blogRouter from './routes/blog';
 
 const app = express();
 
@@ -124,7 +125,7 @@ async function startServer() {
 
     // Start listening
     // Listen on all interfaces (0.0.0.0) for LAN access
-    const server = app.listen(config.port, '0.0.0.0', () => {
+    const server = app.listen(Number(config.port), '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${config.port} (listening on all interfaces)`);
       console.log(`📚 API docs available at http://localhost:${config.port}/api-docs`);
     });

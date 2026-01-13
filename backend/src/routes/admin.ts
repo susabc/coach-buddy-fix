@@ -81,7 +81,7 @@ router.put('/users/:id/status', authenticate, requireSuperAdmin, asyncHandler(as
   await logAuditEvent({
     adminUserId: req.user!.id,
     actionType: AUDIT_ACTIONS.USER_STATUS_CHANGED,
-    targetUserId: req.params.id,
+    targetUserId: req.params.id as string,
     details: { is_active }
   });
   
@@ -159,7 +159,7 @@ router.delete('/users/:userId/roles/:role', authenticate, requireSuperAdmin, asy
   await logAuditEvent({
     adminUserId: req.user!.id,
     actionType: AUDIT_ACTIONS.ROLE_REMOVED,
-    targetUserId: userId,
+    targetUserId: userId as string,
     details: { role }
   });
   
@@ -272,7 +272,7 @@ router.delete('/super-admins/:userId', authenticate, requireSuperAdmin, asyncHan
   await logAuditEvent({
     adminUserId: req.user!.id,
     actionType: AUDIT_ACTIONS.SUPER_ADMIN_REMOVED,
-    targetUserId: userId
+    targetUserId: userId as string
   });
   
   res.json({ message: 'Super admin role revoked successfully' });

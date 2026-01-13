@@ -334,7 +334,10 @@ router.put('/plans/:id', authenticate, asyncHandler(async (req: AuthenticatedReq
   res.json(plan);
 }));
 
-
+/**
+ * @swagger
+ * /api/diet/plans/{id}:
+ *   delete:
  *     tags: [Diet]
  *     summary: Delete a diet plan
  */
