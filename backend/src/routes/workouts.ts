@@ -947,7 +947,7 @@ router.get('/logs/:id', authenticate, asyncHandler(async (req: AuthenticatedRequ
   }
 
   // Get exercises
-  const exercises = await queryAll(
+  const exercises = await queryAll<Record<string, unknown>>(
     `SELECT wle.*, e.name as exercise_name_full, e.primary_muscle, e.equipment
      FROM workout_log_exercises wle
      LEFT JOIN exercises e ON wle.exercise_id = e.id
@@ -957,7 +957,7 @@ router.get('/logs/:id', authenticate, asyncHandler(async (req: AuthenticatedRequ
   );
 
   transformRows(exercises, ['set_data']);
-  log.exercises = exercises;
+  (log as Record<string, unknown>).exercises = exercises;
 
   res.json(log);
 }));
@@ -1072,7 +1072,7 @@ router.post('/logs/:id/exercises', authenticate, asyncHandler(async (req: Authen
     }
   );
 
-  const exercise = await queryOne('SELECT * FROM workout_log_exercises WHERE id = @id', { id: exerciseId });
+  const exercise = await queryOne<Record<string, unknown>>('SELECT * FROM workout_log_exercises WHERE id = @id', { id: exerciseId });
   if (exercise) {
     transformRow(exercise, ['set_data']);
   }
@@ -1116,7 +1116,7 @@ router.put('/logs/exercises/:id', authenticate, asyncHandler(async (req: Authent
     }
   );
 
-  const updated = await queryOne('SELECT * FROM workout_log_exercises WHERE id = @id', { id });
+  const updated = await queryOne<Record<string, unknown>>('SELECT * FROM workout_log_exercises WHERE id = @id', { id });
   if (updated) {
     transformRow(updated, ['set_data']);
   }

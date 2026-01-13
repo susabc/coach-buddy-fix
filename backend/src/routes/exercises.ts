@@ -292,7 +292,10 @@ router.post('/:id/alternatives', authenticate, asyncHandler(async (req: Authenti
   }
 
   // Verify both exercises exist
-  const exercise = await queryOne('SELECT id, created_by, is_system FROM exercises WHERE id = @id', { id });
+  const exercise = await queryOne<{ id: string; created_by: string; is_system: boolean }>(
+    'SELECT id, created_by, is_system FROM exercises WHERE id = @id', 
+    { id }
+  );
   const alternative = await queryOne('SELECT id FROM exercises WHERE id = @altId', { altId: alternative_exercise_id });
 
   if (!exercise || !alternative) {

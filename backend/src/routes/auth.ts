@@ -13,7 +13,7 @@ const router = Router();
 
 // Helper functions
 function generateToken(userId: string, email: string, expiresIn: string): string {
-  return jwt.sign({ userId, email }, config.jwt.secret, { expiresIn });
+  return jwt.sign({ userId, email }, config.jwt.secret, { expiresIn } as jwt.SignOptions);
 }
 
 function generateRefreshToken(): string {
