@@ -15,10 +15,12 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url: config.nodeEnv === 'production' 
-          ? 'https://customcoachpro-api.azurewebsites.net'
-          : `http://localhost:${config.port}`,
-        description: config.nodeEnv === 'production' ? 'Production' : 'Development',
+        url: 'https://customcoachpro-api.azurewebsites.net',
+        description: 'Production',
+      },
+      {
+        url: `http://localhost:${config.port}`,
+        description: 'Development (localhost)',
       },
     ],
     components: {

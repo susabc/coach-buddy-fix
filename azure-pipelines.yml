@@ -50,6 +50,22 @@ stages:
           - script: npm run build
             displayName: 'Build application'
 
+          # Verify dist folder exists and has content
+          - script: |
+              echo "===== VERIFYING VITE BUILD OUTPUT ====="
+              if [ ! -d "dist" ]; then
+                echo "ERROR: dist folder does not exist!"
+                exit 1
+              fi
+              echo "dist folder contents:"
+              ls -la dist/
+              if [ ! -f "dist/index.html" ]; then
+                echo "ERROR: dist/index.html not found - build may have failed!"
+                exit 1
+              fi
+              echo "✓ Build verification passed"
+            displayName: 'Verify build output'
+
           # Copy web.config into dist for IIS
           - task: CopyFiles@2
             inputs:
@@ -65,6 +81,8 @@ stages:
               cp -R dist/* deploy/
               echo "===== DEPLOY FOLDER CONTENT ====="
               ls -la deploy
+              echo "===== Checking for assets ====="
+              ls -la deploy/assets/ 2>/dev/null || echo "No assets folder"
             displayName: 'Prepare frontend deploy folder'
 
           - script: |
@@ -155,6 +173,7 @@ stages:
                         --name customcoachpro-api \
                         --resource-group rg-customer-coach-pro-prod \
                         --settings \
+                        "NODE_ENV=production" \
                         "SQL_USER=$(SQL_USER)" \
                         "SQL_PASSWORD=$(SQL_PASSWORD)" \
                         "JWT_SECRET=$(JWT_SECRET)" \
