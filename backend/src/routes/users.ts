@@ -153,4 +153,116 @@ router.put('/password', authenticate, asyncHandler(async (req: AuthenticatedRequ
   res.json({ message: 'Password updated successfully' });
 }));
 
+// ==================== Onboarding ====================
+
+// Get onboarding status
+router.get('/onboarding', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const profile = await queryOne<{ onboarding_completed: number; onboarding_step: number }>(
+    'SELECT onboarding_completed, onboarding_step FROM profiles WHERE user_id = @userId',
+    { userId: req.user!.id }
+  );
+
+  res.json({
+    onboarding_completed: profile?.onboarding_completed === 1,
+    onboarding_step: profile?.onboarding_step || 0,
+  });
+}));
+
+// Update onboarding status
+router.put('/onboarding', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { completed, step } = req.body;
+
+  await execute(
+    `UPDATE profiles SET
+       onboarding_completed = COALESCE(@completed, onboarding_completed),
+       onboarding_step = COALESCE(@step, onboarding_step),
+       updated_at = GETUTCDATE()
+     WHERE user_id = @userId`,
+    { 
+      userId: req.user!.id, 
+      completed: completed !== undefined ? (completed ? 1 : 0) : null,
+      step: step !== undefined ? step : null
+    }
+  );
+
+  res.json({ message: 'Onboarding status updated' });
+}));
+
+// Complete onboarding (save client profile)
+router.post('/onboarding', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const {
+    dateOfBirth,
+    gender,
+    heightCm,
+    currentWeightKg,
+    targetWeightKg,
+    fitnessGoals,
+    fitnessLevel,
+    medicalConditions,
+    dietaryRestrictions,
+  } = req.body;
+
+  // Update profiles table with basic info
+  await execute(
+    `UPDATE profiles SET
+       date_of_birth = COALESCE(@dateOfBirth, date_of_birth),
+       gender = COALESCE(@gender, gender),
+       updated_at = GETUTCDATE()
+     WHERE user_id = @userId`,
+    { userId: req.user!.id, dateOfBirth, gender }
+  );
+
+  // Check if client_profiles exists
+  const existing = await queryOne('SELECT id FROM client_profiles WHERE user_id = @userId', { userId: req.user!.id });
+
+  if (existing) {
+    await execute(
+      `UPDATE client_profiles SET 
+        height_cm = COALESCE(@heightCm, height_cm),
+        current_weight_kg = COALESCE(@currentWeight, current_weight_kg),
+        target_weight_kg = COALESCE(@targetWeight, target_weight_kg),
+        fitness_goals = COALESCE(@fitnessGoals, fitness_goals),
+        fitness_level = COALESCE(@fitnessLevel, fitness_level),
+        medical_conditions = COALESCE(@medicalConditions, medical_conditions),
+        dietary_restrictions = COALESCE(@dietaryRestrictions, dietary_restrictions),
+        updated_at = GETUTCDATE()
+       WHERE user_id = @userId`,
+      {
+        userId: req.user!.id,
+        heightCm,
+        currentWeight: currentWeightKg,
+        targetWeight: targetWeightKg,
+        fitnessGoals: fitnessGoals ? JSON.stringify(fitnessGoals) : null,
+        fitnessLevel,
+        medicalConditions,
+        dietaryRestrictions: dietaryRestrictions ? JSON.stringify(dietaryRestrictions) : null,
+      }
+    );
+  } else {
+    await execute(
+      `INSERT INTO client_profiles (id, user_id, height_cm, current_weight_kg, target_weight_kg, fitness_goals, fitness_level, medical_conditions, dietary_restrictions)
+       VALUES (@id, @userId, @heightCm, @currentWeight, @targetWeight, @fitnessGoals, @fitnessLevel, @medicalConditions, @dietaryRestrictions)`,
+      {
+        id: uuidv4(),
+        userId: req.user!.id,
+        heightCm,
+        currentWeight: currentWeightKg,
+        targetWeight: targetWeightKg,
+        fitnessGoals: fitnessGoals ? JSON.stringify(fitnessGoals) : null,
+        fitnessLevel,
+        medicalConditions,
+        dietaryRestrictions: dietaryRestrictions ? JSON.stringify(dietaryRestrictions) : null,
+      }
+    );
+  }
+
+  // Mark onboarding as complete
+  await execute(
+    `UPDATE profiles SET onboarding_completed = 1, onboarding_step = 5, updated_at = GETUTCDATE() WHERE user_id = @userId`,
+    { userId: req.user!.id }
+  );
+
+  res.json({ message: 'Onboarding completed successfully' });
+}));
+
 export default router;

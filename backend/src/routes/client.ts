@@ -30,9 +30,16 @@ router.get('/profile', authenticate, asyncHandler(async (req: AuthenticatedReque
   profile.fitness_goals = parseJsonField(profile.fitness_goals);
   profile.dietary_restrictions = parseJsonField(profile.dietary_restrictions);
   
-  // Check completeness
+  // Check completeness - use human-readable labels
+  const fieldLabels: Record<string, string> = {
+    'height_cm': 'Height',
+    'current_weight_kg': 'Current Weight',
+    'fitness_level': 'Fitness Level',
+  };
   const requiredFields = ['height_cm', 'current_weight_kg', 'fitness_level'];
-  const missingFields = requiredFields.filter(f => !profile[f]);
+  const missingFields = requiredFields
+    .filter(f => !profile[f])
+    .map(f => fieldLabels[f] || f);
   
   res.json({
     hasProfile: true,

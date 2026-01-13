@@ -11,7 +11,7 @@ const router = Router();
 
 // Get coach settings/profile
 router.get('/settings', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const profile = await queryOne<Record<string, unknown>>(
+  const data = await queryOne<Record<string, unknown>>(
     `SELECT cp.*, p.full_name, p.email, p.avatar_url, p.bio, p.phone
      FROM coach_profiles cp
      JOIN profiles p ON cp.user_id = p.user_id
@@ -19,15 +19,44 @@ router.get('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
     { userId: req.user!.id }
   );
 
-  if (profile) {
-    transformRow(profile, ['specializations', 'certifications']);
+  if (!data) {
+    // Return empty structure if no profile exists
+    return res.json({
+      profile: { full_name: '', bio: '', phone: '', avatar_url: '' },
+      coachProfile: {}
+    });
   }
 
-  res.json(profile || {});
+  transformRow(data, ['specializations', 'certifications']);
+
+  // Return in nested format expected by frontend
+  res.json({
+    profile: {
+      full_name: data.full_name || '',
+      bio: data.bio || '',
+      phone: data.phone || '',
+      avatar_url: data.avatar_url || '',
+    },
+    coachProfile: {
+      specializations: data.specializations || [],
+      certifications: data.certifications || [],
+      experience_years: data.experience_years || 0,
+      hourly_rate: data.hourly_rate,
+      currency: data.currency || 'USD',
+      max_clients: data.max_clients || 50,
+      is_accepting_clients: data.is_accepting_clients ?? true,
+      email_checkin_received: data.email_checkin_received ?? true,
+      email_plan_assigned: data.email_plan_assigned ?? true,
+    }
+  });
 }));
 
 // Update coach settings/profile
 router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  // Support both nested (frontend) and flat (legacy) request formats
+  const profile = req.body.profile || {};
+  const coachProfile = req.body.coachProfile || req.body;
+
   const {
     specializations,
     certifications,
@@ -36,11 +65,11 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
     currency,
     max_clients,
     is_accepting_clients,
-    bio,
-    phone,
     email_checkin_received,
     email_plan_assigned,
-  } = req.body;
+  } = coachProfile;
+
+  const { full_name, bio, phone, avatar_url } = profile;
 
   // Update coach_profiles
   await execute(
@@ -70,15 +99,17 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
     }
   );
 
-  // Update profile bio/phone if provided
-  if (bio !== undefined || phone !== undefined) {
+  // Update profiles table with full_name, bio, phone, avatar_url
+  if (full_name !== undefined || bio !== undefined || phone !== undefined || avatar_url !== undefined) {
     await execute(
       `UPDATE profiles SET
+         full_name = COALESCE(@fullName, full_name),
          bio = COALESCE(@bio, bio),
          phone = COALESCE(@phone, phone),
+         avatar_url = COALESCE(@avatarUrl, avatar_url),
          updated_at = GETUTCDATE()
        WHERE user_id = @userId`,
-      { userId: req.user!.id, bio, phone }
+      { userId: req.user!.id, fullName: full_name, bio, phone, avatarUrl: avatar_url }
     );
   }
 
