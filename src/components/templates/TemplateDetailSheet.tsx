@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -21,16 +22,17 @@ import {
   Zap, 
   Dumbbell,
   Play,
-  Copy,
   Loader2,
-  FileDown
+  Edit,
+  ArrowLeft,
 } from "lucide-react";
 import { useWorkoutTemplateDetail } from "@/hooks/useWorkoutTemplates";
 import { useStartProgram } from "@/hooks/useStartProgram";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "sonner";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { WorkoutPlanPdf } from "@/components/pdf/WorkoutPlanPdf";
+import { WorkoutProgramEditor } from "./WorkoutProgramEditor";
 
 interface TemplateDetailSheetProps {
   templateId: string | null;
@@ -63,22 +65,50 @@ const typeColors: Record<string, string> = {
 };
 
 export function TemplateDetailSheet({ templateId, open, onOpenChange }: TemplateDetailSheetProps) {
+  const { user } = useAuth();
+  const [isEditing, setIsEditing] = useState(false);
   const { data: template, isLoading } = useWorkoutTemplateDetail(templateId);
   const startProgram = useStartProgram();
+
+  // Check if user can edit this template
+  const canEdit = template && (template.created_by === user?.id || user?.roles?.includes('super_admin'));
 
   const handleStartProgram = () => {
     if (!templateId) return;
     startProgram.mutate({ templateId });
   };
+  
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      setIsEditing(false); // Reset edit mode when closing
+    }
+    onOpenChange(newOpen);
+  };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent className="w-full sm:max-w-2xl p-0">
         <ScrollArea className="h-full">
           <div className="p-6">
             {isLoading ? (
               <TemplateDetailSkeleton />
             ) : template ? (
+              isEditing && templateId ? (
+                // Edit Mode - Show WorkoutProgramEditor
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="icon" onClick={() => setIsEditing(false)}>
+                      <ArrowLeft className="w-4 h-4" />
+                    </Button>
+                    <div>
+                      <h2 className="font-semibold text-lg">Edit Program</h2>
+                      <p className="text-sm text-muted-foreground">{template.name}</p>
+                    </div>
+                  </div>
+                  <WorkoutProgramEditor templateId={templateId} onClose={() => setIsEditing(false)} />
+                </div>
+              ) : (
+              // View Mode
               <div className="space-y-6">
                 <SheetHeader className="text-left">
                   <SheetTitle className="text-2xl pr-8">{template.name}</SheetTitle>
@@ -142,7 +172,7 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
                 )}
 
                 {/* Action Buttons */}
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                   <Button 
                     className="flex-1 gap-2" 
                     onClick={handleStartProgram}
@@ -155,6 +185,16 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
                     )}
                     Start Program
                   </Button>
+                  {canEdit && (
+                    <Button 
+                      variant="outline" 
+                      className="gap-2"
+                      onClick={() => setIsEditing(true)}
+                    >
+                      <Edit className="w-4 h-4" />
+                      Edit Program
+                    </Button>
+                  )}
                   <ExportPdfButton
                     document={
                       <WorkoutPlanPdf
@@ -282,6 +322,7 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
                   )}
                 </div>
               </div>
+              )
             ) : (
               <div className="text-center text-muted-foreground py-8">
                 Template not found
