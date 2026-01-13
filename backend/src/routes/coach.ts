@@ -27,7 +27,8 @@ router.get('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
     });
   }
 
-  transformRow(data, ['specializations', 'certifications']);
+  // Use arrayFields parameter to ensure these are always arrays
+  transformRow(data, [], ['specializations', 'certifications']);
 
   // Return in nested format expected by frontend
   res.json({

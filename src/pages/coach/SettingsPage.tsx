@@ -122,8 +122,11 @@ export default function CoachSettingsPage() {
       setPhone(profiles.profile?.phone || "");
       setAvatarUrl(profiles.profile?.avatar_url || "");
       
-      setSpecializations(profiles.coachProfile?.specializations || []);
-      setCertifications(profiles.coachProfile?.certifications || []);
+      // Ensure arrays with defensive defaults
+      const specs = profiles.coachProfile?.specializations;
+      setSpecializations(Array.isArray(specs) ? specs : []);
+      const certs = profiles.coachProfile?.certifications;
+      setCertifications(Array.isArray(certs) ? certs : []);
       setExperienceYears(profiles.coachProfile?.experience_years || 0);
       setHourlyRate(profiles.coachProfile?.hourly_rate ?? null);
       setCurrency(profiles.coachProfile?.currency || "USD");

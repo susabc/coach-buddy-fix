@@ -569,6 +569,35 @@ router.post('/template-exercises', authenticate, asyncHandler(async (req: Authen
     finalOrderIndex = (maxOrder?.max_order ?? -1) + 1;
   }
 
+  // If custom exercise name is provided, also add it to the exercises library
+  let finalExerciseId = exercise_id;
+  if (!exercise_id && custom_exercise_name) {
+    // Check if an exercise with this name already exists (case-insensitive)
+    const existingExercise = await queryOne<{ id: string }>(
+      `SELECT id FROM exercises WHERE LOWER(name) = LOWER(@name)`,
+      { name: custom_exercise_name }
+    );
+    
+    if (existingExercise) {
+      // Use existing exercise ID instead of custom name
+      finalExerciseId = existingExercise.id;
+    } else {
+      // Create new exercise in the library
+      const newExerciseId = uuidv4();
+      await execute(
+        `INSERT INTO exercises (id, name, description, primary_muscle, equipment, difficulty, exercise_type, is_custom, created_by, created_at)
+         VALUES (@id, @name, @description, 'other', 'other', 'intermediate', 'compound', 1, @createdBy, GETUTCDATE())`,
+        {
+          id: newExerciseId,
+          name: custom_exercise_name,
+          description: `Custom exercise: ${custom_exercise_name}`,
+          createdBy: req.user!.id,
+        }
+      );
+      finalExerciseId = newExerciseId;
+    }
+  }
+
   const id = uuidv4();
   await execute(
     `INSERT INTO workout_template_exercises (id, day_id, exercise_id, custom_exercise_name, order_index, sets_min, sets_max, reps_min, reps_max, rest_seconds_min, rest_seconds_max, notes)
@@ -576,8 +605,8 @@ router.post('/template-exercises', authenticate, asyncHandler(async (req: Authen
     {
       id,
       dayId: day_id,
-      exerciseId: exercise_id,
-      customName: custom_exercise_name,
+      exerciseId: finalExerciseId,
+      customName: finalExerciseId ? null : custom_exercise_name, // Only store custom name if no exercise_id
       orderIndex: finalOrderIndex,
       setsMin: sets_min,
       setsMax: sets_max,
