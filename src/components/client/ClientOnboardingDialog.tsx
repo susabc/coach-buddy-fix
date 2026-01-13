@@ -22,12 +22,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { Progress } from "@/components/ui/progress";
 import { 
   User, Scale, Target, Heart, Utensils, ChevronRight, ChevronLeft, 
-  Check, Loader2
+  Check, Loader2, CalendarIcon
 } from "lucide-react";
 import { toast } from "sonner";
+import { format, parse } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface ClientOnboardingDialogProps {
   open: boolean;
@@ -187,13 +195,38 @@ export function ClientOnboardingDialog({ open, onOpenChange, onComplete }: Clien
               
               <div>
                 <Label htmlFor="dob" className="text-sm">Date of Birth</Label>
-                <Input
-                  id="dob"
-                  type="date"
-                  value={formData.dateOfBirth}
-                  onChange={(e) => updateField("dateOfBirth", e.target.value)}
-                  className="mt-1"
-                />
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    id="dob"
+                    type="date"
+                    value={formData.dateOfBirth}
+                    onChange={(e) => updateField("dateOfBirth", e.target.value)}
+                    className="flex-1"
+                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="icon" type="button">
+                        <CalendarIcon className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="end">
+                      <Calendar
+                        mode="single"
+                        selected={formData.dateOfBirth ? parse(formData.dateOfBirth, 'yyyy-MM-dd', new Date()) : undefined}
+                        onSelect={(date) => {
+                          if (date) {
+                            updateField("dateOfBirth", format(date, 'yyyy-MM-dd'));
+                          }
+                        }}
+                        initialFocus
+                        captionLayout="dropdown-buttons"
+                        fromYear={1940}
+                        toYear={new Date().getFullYear() - 10}
+                        className={cn("p-3 pointer-events-auto")}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
 
               <div>
