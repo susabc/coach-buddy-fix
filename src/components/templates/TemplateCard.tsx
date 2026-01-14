@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, Zap, MoreVertical, Eye, ClipboardList, Edit, Trash2, Play, Loader2, Dumbbell } from "lucide-react";
+import { Calendar, Clock, Zap, MoreVertical, Eye, ClipboardList, Edit, Trash2, Play, Loader2, Dumbbell, Shield } from "lucide-react";
 import { FavoriteButton } from "@/components/favorites/FavoriteButton";
 import {
   DropdownMenu,
@@ -161,6 +161,12 @@ export function TemplateCard({
 
         {/* Tags */}
         <div className="flex flex-wrap gap-2">
+          {template.is_system && (
+            <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
+              <Shield className="w-3 h-3 mr-1" />
+              System
+            </Badge>
+          )}
           {template.template_type && (
             <Badge 
               variant="outline" 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Search, ChefHat, Flame, Beef, Wheat, Droplet, Edit, Trash2, Clock, Users } from "lucide-react";
+import { Plus, Search, ChefHat, Flame, Beef, Wheat, Droplet, Edit, Trash2, Clock, Users, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -230,10 +230,15 @@ function RecipeCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
+          {isSystem && (
+            <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
+              <Shield className="w-3 h-3 mr-1" />
+              System
+            </Badge>
+          )}
           {recipe.category && (
             <Badge variant="secondary">{recipe.category}</Badge>
           )}
-          {isSystem && <Badge>System</Badge>}
           {totalTime > 0 && (
             <Badge variant="outline" className="flex items-center gap-1">
               <Clock className="h-3 w-3" />

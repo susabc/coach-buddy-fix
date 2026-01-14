@@ -25,6 +25,7 @@ import {
   Loader2,
   Edit,
   ArrowLeft,
+  Shield,
 } from "lucide-react";
 import { useWorkoutTemplateDetail } from "@/hooks/useWorkoutTemplates";
 import { useStartProgram } from "@/hooks/useStartProgram";
@@ -148,6 +149,12 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
 
                 {/* Tags */}
                 <div className="flex flex-wrap gap-2">
+                  {template.is_system && (
+                    <Badge className="bg-primary/20 text-primary border-primary/30">
+                      <Shield className="w-3 h-3 mr-1" />
+                      System Program
+                    </Badge>
+                  )}
                   {template.template_type && (
                     <Badge 
                       variant="outline" 
