@@ -16,12 +16,25 @@ const router = Router();
 router.get('/plans', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { goal, dietary_type, search } = req.query;
 
-  let whereClause = 'WHERE (is_system = 1';
+  // Build visibility logic:
+  // - Super admins see all plans
+  // - Regular users see: published system plans + their own plans
+  // - Anonymous users see: published system plans only
+  let whereClause = 'WHERE (';
   const params: Record<string, unknown> = {};
-
-  if (req.user) {
-    whereClause += ' OR created_by = @userId';
+  
+  const isSuperAdmin = req.user?.roles?.includes('super_admin');
+  
+  if (isSuperAdmin) {
+    // Super admin sees everything
+    whereClause += '1=1';
+  } else if (req.user) {
+    // Logged-in users see published system plans + their own
+    whereClause += '(is_system = 1 AND ISNULL(is_published, 1) = 1) OR created_by = @userId';
     params.userId = req.user.id;
+  } else {
+    // Anonymous users see only published system plans
+    whereClause += 'is_system = 1 AND ISNULL(is_published, 1) = 1';
   }
   whereClause += ')';
 
@@ -40,7 +53,7 @@ router.get('/plans', optionalAuth, asyncHandler(async (req: AuthenticatedRequest
 
   const plans = await queryAll<Record<string, unknown>>(
     `SELECT id, name, description, calories_target, protein_grams, carbs_grams, fat_grams,
-            meals_per_day, dietary_type, goal, is_system, is_active, created_by, created_at
+            meals_per_day, dietary_type, goal, is_system, is_published, is_active, created_by, created_at
      FROM diet_plans ${whereClause}
      ORDER BY name`,
     params
@@ -122,6 +135,7 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
     notes,
     meals,
     is_system, // Allow super admin to set this
+    is_published = true, // Default to published
   } = req.body;
 
   if (!name) {
@@ -132,10 +146,12 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
   const isSuperAdmin = req.user!.roles.includes('super_admin');
   // Only super admins can create system diet plans
   const systemFlag = isSuperAdmin && is_system ? 1 : 0;
+  // is_published only applies to system plans
+  const publishedFlag = systemFlag ? (is_published ? 1 : 0) : 1;
 
   await execute(
-    `INSERT INTO diet_plans (id, name, description, calories_target, protein_grams, carbs_grams, fat_grams, meals_per_day, dietary_type, goal, notes, is_system, is_active, created_by)
-     VALUES (@id, @name, @description, @caloriesTarget, @proteinGrams, @carbsGrams, @fatGrams, @mealsPerDay, @dietaryType, @goal, @notes, @isSystem, 1, @createdBy)`,
+    `INSERT INTO diet_plans (id, name, description, calories_target, protein_grams, carbs_grams, fat_grams, meals_per_day, dietary_type, goal, notes, is_system, is_published, is_active, created_by)
+     VALUES (@id, @name, @description, @caloriesTarget, @proteinGrams, @carbsGrams, @fatGrams, @mealsPerDay, @dietaryType, @goal, @notes, @isSystem, @isPublished, 1, @createdBy)`,
     {
       id: planId,
       name,
@@ -149,6 +165,7 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
       goal,
       notes,
       isSystem: systemFlag,
+      isPublished: publishedFlag,
       createdBy: req.user!.id,
     }
   );
@@ -378,6 +395,38 @@ router.delete('/plans/:id', authenticate, asyncHandler(async (req: Authenticated
   await execute('DELETE FROM diet_plans WHERE id = @id', { id });
 
   res.json({ message: 'Diet plan deleted' });
+}));
+
+// Toggle published status for system diet plans (super admin only)
+router.patch('/plans/:id/publish', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { is_published } = req.body;
+
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  if (!isSuperAdmin) {
+    throw ForbiddenError('Only super admins can change publish status');
+  }
+
+  const existing = await queryOne<{ is_system: boolean }>(
+    'SELECT is_system FROM diet_plans WHERE id = @id',
+    { id }
+  );
+
+  if (!existing) {
+    throw NotFoundError('Diet plan');
+  }
+
+  if (!existing.is_system) {
+    throw BadRequestError('Only system diet plans can have publish status changed');
+  }
+
+  await execute(
+    'UPDATE diet_plans SET is_published = @isPublished, updated_at = GETUTCDATE() WHERE id = @id',
+    { id, isPublished: is_published ? 1 : 0 }
+  );
+
+  const plan = await queryOne('SELECT * FROM diet_plans WHERE id = @id', { id });
+  res.json(plan);
 }));
 
 /**

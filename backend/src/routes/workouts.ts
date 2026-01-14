@@ -18,12 +18,25 @@ const router = Router();
 router.get('/templates', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { difficulty, goal, search, days_per_week } = req.query;
 
-  let whereClause = 'WHERE (is_system = 1';
+  // Build visibility logic:
+  // - Super admins see all templates
+  // - Regular users see: published system templates + their own templates
+  // - Anonymous users see: published system templates only
+  let whereClause = 'WHERE (';
   const params: Record<string, unknown> = {};
-
-  if (req.user) {
-    whereClause += ' OR created_by = @userId';
+  
+  const isSuperAdmin = req.user?.roles?.includes('super_admin');
+  
+  if (isSuperAdmin) {
+    // Super admin sees everything
+    whereClause += '1=1';
+  } else if (req.user) {
+    // Logged-in users see published system templates + their own
+    whereClause += '(is_system = 1 AND ISNULL(is_published, 1) = 1) OR created_by = @userId';
     params.userId = req.user.id;
+  } else {
+    // Anonymous users see only published system templates
+    whereClause += 'is_system = 1 AND ISNULL(is_published, 1) = 1';
   }
   whereClause += ')';
 
@@ -46,7 +59,7 @@ router.get('/templates', optionalAuth, asyncHandler(async (req: AuthenticatedReq
 
   const templates = await queryAll<Record<string, unknown>>(
     `SELECT id, name, description, difficulty, duration_weeks, days_per_week,
-            goal, template_type, is_periodized, is_system, created_by, created_at
+            goal, template_type, is_periodized, is_system, is_published, created_by, created_at
      FROM workout_templates ${whereClause}
      ORDER BY name`,
     params
@@ -161,6 +174,7 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
     weeks,
     days,
     is_system, // Allow super admin to set this
+    is_published = true, // Default to published
   } = req.body;
 
   if (!name) {
@@ -171,10 +185,12 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
   const isSuperAdmin = req.user!.roles.includes('super_admin');
   // Only super admins can create system templates
   const systemFlag = isSuperAdmin && is_system ? 1 : 0;
+  // is_published only applies to system templates
+  const publishedFlag = systemFlag ? (is_published ? 1 : 0) : 1;
 
   await execute(
-    `INSERT INTO workout_templates (id, name, description, difficulty, duration_weeks, days_per_week, goal, template_type, is_periodized, is_system, created_by)
-     VALUES (@id, @name, @description, @difficulty, @durationWeeks, @daysPerWeek, @goal, @templateType, @isPeriodized, @isSystem, @createdBy)`,
+    `INSERT INTO workout_templates (id, name, description, difficulty, duration_weeks, days_per_week, goal, template_type, is_periodized, is_system, is_published, created_by)
+     VALUES (@id, @name, @description, @difficulty, @durationWeeks, @daysPerWeek, @goal, @templateType, @isPeriodized, @isSystem, @isPublished, @createdBy)`,
     {
       id: templateId,
       name,
@@ -186,6 +202,7 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
       templateType: template_type,
       isPeriodized: is_periodized ? 1 : 0,
       isSystem: systemFlag,
+      isPublished: publishedFlag,
       createdBy: req.user!.id,
     }
   );
@@ -408,6 +425,38 @@ router.delete('/templates/:id', authenticate, asyncHandler(async (req: Authentic
   await execute('DELETE FROM workout_templates WHERE id = @id', { id });
 
   res.json({ message: 'Template deleted' });
+}));
+
+// Toggle published status for system templates (super admin only)
+router.patch('/templates/:id/publish', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { is_published } = req.body;
+
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  if (!isSuperAdmin) {
+    throw ForbiddenError('Only super admins can change publish status');
+  }
+
+  const existing = await queryOne<{ is_system: boolean }>(
+    'SELECT is_system FROM workout_templates WHERE id = @id',
+    { id }
+  );
+
+  if (!existing) {
+    throw NotFoundError('Workout template');
+  }
+
+  if (!existing.is_system) {
+    throw BadRequestError('Only system templates can have publish status changed');
+  }
+
+  await execute(
+    'UPDATE workout_templates SET is_published = @isPublished, updated_at = GETUTCDATE() WHERE id = @id',
+    { id, isPublished: is_published ? 1 : 0 }
+  );
+
+  const template = await queryOne('SELECT * FROM workout_templates WHERE id = @id', { id });
+  res.json(template);
 }));
 
 // ==================== Template Structure Editing ====================
