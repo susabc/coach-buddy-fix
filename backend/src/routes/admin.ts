@@ -660,4 +660,97 @@ router.post('/content/:type/import', authenticate, requireSuperAdmin, asyncHandl
   });
 }));
 
+// ============ Data Integrity - Missing Profiles Scanner ============
+
+router.get('/data-integrity/missing-profiles', authenticate, requireSuperAdmin, asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+  // Find users who exist in the users table but are missing a profiles row
+  const missingProfiles = await queryAll<{
+    user_id: string;
+    email: string;
+    created_at: string;
+  }>(
+    `SELECT u.id as user_id, u.email, u.created_at
+     FROM users u
+     LEFT JOIN profiles p ON u.id = p.user_id
+     WHERE p.id IS NULL
+     ORDER BY u.created_at DESC`
+  );
+
+  // Also find coach_profiles missing their base profile
+  const coachesWithoutProfiles = await queryAll<{
+    user_id: string;
+    coach_profile_id: string;
+  }>(
+    `SELECT cp.user_id, cp.id as coach_profile_id
+     FROM coach_profiles cp
+     LEFT JOIN profiles p ON cp.user_id = p.user_id
+     WHERE p.id IS NULL`
+  );
+
+  res.json({
+    missingProfiles,
+    coachesWithoutProfiles,
+    summary: {
+      usersMissingProfiles: missingProfiles.length,
+      coachesMissingBaseProfiles: coachesWithoutProfiles.length,
+      totalIssues: missingProfiles.length,
+    }
+  });
+}));
+
+router.post('/data-integrity/repair-profiles', authenticate, requireSuperAdmin, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { userIds } = req.body;
+
+  if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+    throw BadRequestError('userIds array is required');
+  }
+
+  let repairedCount = 0;
+  const errors: { userId: string; error: string }[] = [];
+
+  for (const userId of userIds) {
+    try {
+      // Get user email to use as fallback for full_name
+      const user = await queryOne<{ email: string }>(
+        'SELECT email FROM users WHERE id = @userId',
+        { userId }
+      );
+
+      if (!user) {
+        errors.push({ userId, error: 'User not found' });
+        continue;
+      }
+
+      // Use MERGE to create profile if missing
+      await execute(
+        `MERGE profiles AS target
+         USING (SELECT @userId AS user_id) AS source
+         ON target.user_id = source.user_id
+         WHEN NOT MATCHED THEN
+           INSERT (id, user_id, full_name, email, created_at, updated_at)
+           VALUES (NEWID(), @userId, '', @email, GETUTCDATE(), GETUTCDATE());`,
+        { userId, email: user.email }
+      );
+
+      repairedCount++;
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push({ userId, error: errMsg });
+    }
+  }
+
+  // Log the repair action
+  await logAuditEvent(req.user!.id, AUDIT_ACTIONS.ADMIN_ACTION, 'data_integrity', null, {
+    action: 'repair_missing_profiles',
+    repairedCount,
+    errorCount: errors.length,
+  });
+
+  res.json({
+    message: `Repaired ${repairedCount} profiles`,
+    repairedCount,
+    errors,
+  });
+}));
+
 export default router;
