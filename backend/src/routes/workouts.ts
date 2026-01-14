@@ -16,10 +16,10 @@ const router = Router();
  *     summary: Get all workout templates
  */
 router.get('/templates', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { difficulty, goal, search, days_per_week } = req.query;
+  const { difficulty, goal, search, days_per_week, is_system } = req.query;
 
   // Build visibility logic:
-  // - Super admins see all templates
+  // - Super admins see all templates (or filtered by is_system if specified)
   // - Regular users see: published system templates + their own templates
   // - Anonymous users see: published system templates only
   let whereClause = 'WHERE (';
@@ -28,8 +28,14 @@ router.get('/templates', optionalAuth, asyncHandler(async (req: AuthenticatedReq
   const isSuperAdmin = req.user?.roles?.includes('super_admin');
   
   if (isSuperAdmin) {
-    // Super admin sees everything
-    whereClause += '1=1';
+    // Super admin sees everything, but can filter by is_system
+    if (is_system === 'true') {
+      whereClause += 'is_system = 1';
+    } else if (is_system === 'false') {
+      whereClause += 'is_system = 0';
+    } else {
+      whereClause += '1=1';
+    }
   } else if (req.user) {
     // Logged-in users see published system templates + their own
     whereClause += '(is_system = 1 AND ISNULL(is_published, 1) = 1) OR created_by = @userId';
@@ -1094,7 +1100,7 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
     }
   );
 
-  // Insert exercises
+  // Insert exercises from provided array
   if (exercises && Array.isArray(exercises)) {
     for (let i = 0; i < exercises.length; i++) {
       const ex = exercises[i];
@@ -1111,6 +1117,113 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
           setData: JSON.stringify(ex.set_data || []),
           notes: ex.notes,
         }
+      );
+    }
+  } else if (preload_exercises && template_id) {
+    // Preload exercises from template when starting from a program
+    // First, determine which day to use
+    let dayId = template_day_id;
+    
+    if (!dayId) {
+      // If no specific day provided, get the current day based on assignment progress
+      // For now, just get day 1 or calculate based on start date
+      const template = await queryOne<{ days_per_week: number }>(
+        'SELECT days_per_week FROM workout_templates WHERE id = @templateId',
+        { templateId: template_id }
+      );
+      
+      if (template) {
+        // Get assignment start date to calculate which day
+        let dayNumber = 1;
+        if (assignment_id) {
+          const assignment = await queryOne<{ start_date: string }>(
+            'SELECT start_date FROM plan_assignments WHERE id = @assignmentId',
+            { assignmentId: assignment_id }
+          );
+          if (assignment) {
+            const startDate = new Date(assignment.start_date);
+            const today = new Date();
+            const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+            dayNumber = (daysSinceStart % template.days_per_week) + 1;
+          }
+        }
+        
+        // Find the day with this day_number (prefer standalone days, then week 1 days)
+        const day = await queryOne<{ id: string }>(
+          `SELECT TOP 1 id FROM workout_template_days 
+           WHERE template_id = @templateId AND day_number = @dayNumber
+           ORDER BY week_id NULLS FIRST`,
+          { templateId: template_id, dayNumber }
+        );
+        
+        if (day) {
+          dayId = day.id;
+        }
+      }
+    }
+    
+    // Get exercises for this day and preload them
+    if (dayId) {
+      const templateExercises = await queryAll<{
+        exercise_id: string | null;
+        exercise_name: string | null;
+        custom_exercise_name: string | null;
+        order_index: number;
+        sets_min: number;
+        sets_max: number | null;
+        reps_min: number;
+        reps_max: number | null;
+        rest_seconds_min: number | null;
+        rest_seconds_max: number | null;
+        notes: string | null;
+      }>(
+        `SELECT wte.exercise_id, e.name as exercise_name, wte.custom_exercise_name,
+                wte.order_index, wte.sets_min, wte.sets_max, wte.reps_min, wte.reps_max,
+                wte.rest_seconds_min, wte.rest_seconds_max, wte.notes
+         FROM workout_template_exercises wte
+         LEFT JOIN exercises e ON wte.exercise_id = e.id
+         WHERE wte.day_id = @dayId
+         ORDER BY wte.order_index`,
+        { dayId }
+      );
+      
+      for (let i = 0; i < templateExercises.length; i++) {
+        const tex = templateExercises[i];
+        const exerciseName = tex.exercise_name || tex.custom_exercise_name || 'Exercise';
+        const numSets = tex.sets_min || 3;
+        const reps = tex.reps_min || 10;
+        
+        // Create set_data array with the template's set/rep scheme
+        const setDataArray = [];
+        for (let s = 1; s <= numSets; s++) {
+          setDataArray.push({
+            setNumber: s,
+            reps: reps,
+            weight: 0,
+            completed: false,
+          });
+        }
+        
+        await execute(
+          `INSERT INTO workout_log_exercises (id, workout_log_id, exercise_id, exercise_name, order_index, sets_completed, set_data, notes)
+           VALUES (@id, @logId, @exerciseId, @exerciseName, @orderIndex, @setsCompleted, @setData, @notes)`,
+          {
+            id: uuidv4(),
+            logId,
+            exerciseId: tex.exercise_id || null,
+            exerciseName,
+            orderIndex: i,
+            setsCompleted: 0,
+            setData: JSON.stringify(setDataArray),
+            notes: tex.notes || null,
+          }
+        );
+      }
+      
+      // Update the log to track which day was used
+      await execute(
+        'UPDATE workout_logs SET template_day_id = @dayId WHERE id = @logId',
+        { dayId, logId }
       );
     }
   }

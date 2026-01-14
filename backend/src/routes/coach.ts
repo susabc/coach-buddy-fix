@@ -72,15 +72,20 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
 
   const { full_name, bio, phone, avatar_url } = profile;
 
+  // Convert arrays to JSON strings - always serialize even if empty array
+  const specializationsJson = Array.isArray(specializations) ? JSON.stringify(specializations) : null;
+  const certificationsJson = Array.isArray(certifications) ? JSON.stringify(certifications) : null;
+
   // Upsert coach_profiles using MERGE
+  // Use direct assignment for arrays (not COALESCE) to allow saving empty arrays
   await execute(
     `MERGE coach_profiles AS target
      USING (SELECT @userId AS user_id) AS source
      ON target.user_id = source.user_id
      WHEN MATCHED THEN
        UPDATE SET
-         specializations = COALESCE(@specializations, target.specializations),
-         certifications = COALESCE(@certifications, target.certifications),
+         specializations = CASE WHEN @hasSpecs = 1 THEN @specializations ELSE target.specializations END,
+         certifications = CASE WHEN @hasCerts = 1 THEN @certifications ELSE target.certifications END,
          experience_years = COALESCE(@experienceYears, target.experience_years),
          hourly_rate = COALESCE(@hourlyRate, target.hourly_rate),
          currency = COALESCE(@currency, target.currency),
@@ -94,8 +99,10 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
        VALUES (NEWID(), @userId, @specializations, @certifications, @experienceYears, @hourlyRate, COALESCE(@currency, 'USD'), COALESCE(@maxClients, 50), COALESCE(@isAccepting, 1), COALESCE(@emailCheckin, 1), COALESCE(@emailPlan, 1), GETUTCDATE(), GETUTCDATE());`,
     {
       userId: req.user!.id,
-      specializations: specializations ? JSON.stringify(specializations) : null,
-      certifications: certifications ? JSON.stringify(certifications) : null,
+      specializations: specializationsJson,
+      certifications: certificationsJson,
+      hasSpecs: specializations !== undefined ? 1 : 0,
+      hasCerts: certifications !== undefined ? 1 : 0,
       experienceYears: experience_years ?? null,
       hourlyRate: hourly_rate ?? null,
       currency: currency ?? null,
