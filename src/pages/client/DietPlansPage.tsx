@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Utensils, Flame, Beef, Wheat, Droplet } from "lucide-react";
+import { Search, Utensils, Flame, Beef, Wheat, Droplet, Shield } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -145,13 +145,18 @@ function DietPlanCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
+          {plan.is_system && (
+            <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
+              <Shield className="w-3 h-3 mr-1" />
+              System
+            </Badge>
+          )}
           {plan.goal && (
             <Badge variant="secondary">{goalLabels[plan.goal] || plan.goal}</Badge>
           )}
           {plan.dietary_type && (
             <Badge variant="outline">{dietaryLabels[plan.dietary_type] || plan.dietary_type}</Badge>
           )}
-          {plan.is_system && <Badge>System</Badge>}
         </div>
 
         {plan.calories_target && (
