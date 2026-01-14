@@ -23,10 +23,10 @@ const router = Router();
  *       200: { description: List of recipes }
  */
 router.get('/', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { category, search, limit = 100 } = req.query;
+  const { category, search, limit = 100, is_system } = req.query;
 
   // Build visibility logic:
-  // - Super admins see all recipes
+  // - Super admins see all recipes (or filtered by is_system if specified)
   // - Regular users see: published system recipes + their own recipes
   // - Anonymous users see: published system recipes only
   let whereClause = 'WHERE (';
@@ -35,8 +35,14 @@ router.get('/', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res
   const isSuperAdmin = req.user?.roles?.includes('super_admin');
   
   if (isSuperAdmin) {
-    // Super admin sees everything
-    whereClause += '1=1';
+    // Super admin sees everything, but can filter by is_system
+    if (is_system === 'true') {
+      whereClause += 'is_system = 1';
+    } else if (is_system === 'false') {
+      whereClause += 'is_system = 0';
+    } else {
+      whereClause += '1=1';
+    }
   } else if (req.user) {
     // Logged-in users see published system recipes + their own
     whereClause += '(is_system = 1 AND ISNULL(is_published, 1) = 1) OR created_by = @userId';

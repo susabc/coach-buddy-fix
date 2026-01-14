@@ -14,10 +14,10 @@ const router = Router();
  *     summary: Get all diet plans
  */
 router.get('/plans', optionalAuth, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { goal, dietary_type, search } = req.query;
+  const { goal, dietary_type, search, is_system } = req.query;
 
   // Build visibility logic:
-  // - Super admins see all plans
+  // - Super admins see all plans (or filtered by is_system if specified)
   // - Regular users see: published system plans + their own plans
   // - Anonymous users see: published system plans only
   let whereClause = 'WHERE (';
@@ -26,8 +26,14 @@ router.get('/plans', optionalAuth, asyncHandler(async (req: AuthenticatedRequest
   const isSuperAdmin = req.user?.roles?.includes('super_admin');
   
   if (isSuperAdmin) {
-    // Super admin sees everything
-    whereClause += '1=1';
+    // Super admin sees everything, but can filter by is_system
+    if (is_system === 'true') {
+      whereClause += 'is_system = 1';
+    } else if (is_system === 'false') {
+      whereClause += 'is_system = 0';
+    } else {
+      whereClause += '1=1';
+    }
   } else if (req.user) {
     // Logged-in users see published system plans + their own
     whereClause += '(is_system = 1 AND ISNULL(is_published, 1) = 1) OR created_by = @userId';
