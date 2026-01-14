@@ -136,6 +136,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
     fiber_per_serving,
     image_url,
     ingredients,
+    is_system, // Allow super admin to set this
   } = req.body;
 
   if (!name) {
@@ -143,6 +144,9 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
   }
 
   const id = uuidv4();
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  // Only super admins can create system recipes
+  const systemFlag = isSuperAdmin && is_system ? 1 : 0;
 
   await execute(
     `INSERT INTO recipes (id, name, description, category, instructions, prep_time_minutes, cook_time_minutes,
@@ -152,7 +156,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
      VALUES (@id, @name, @description, @category, @instructions, @prepTimeMinutes, @cookTimeMinutes,
              @servings, @totalWeightG, @caloriesPerServing, @proteinPerServing,
              @carbsPerServing, @fatPerServing, @fiberPerServing, @imageUrl,
-             0, @createdBy)`,
+             @isSystem, @createdBy)`,
     {
       id,
       name,
@@ -169,6 +173,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
       fatPerServing: fat_per_serving,
       fiberPerServing: fiber_per_serving,
       imageUrl: image_url,
+      isSystem: systemFlag,
       createdBy: req.user!.id,
     }
   );

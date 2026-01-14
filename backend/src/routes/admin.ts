@@ -13,17 +13,31 @@ const router = Router();
 
 router.get('/stats', authenticate, requireSuperAdmin, asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
   const users = await queryAll<{ count: number }>('SELECT COUNT(*) as count FROM users');
+  const admins = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM user_roles WHERE role = 'super_admin'`);
   const coaches = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM user_roles WHERE role = 'coach'`);
   const clients = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM user_roles WHERE role = 'client'`);
-  const activeRelationships = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM coach_client_relationships WHERE status = 'active'`);
+  const activeCoachings = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM coach_client_relationships WHERE status = 'active'`);
   const pendingRequests = await queryAll<{ count: number }>(`SELECT COUNT(*) as count FROM coaching_requests WHERE status = 'pending'`);
+  
+  // Get system content counts
+  const systemExercises = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM exercises WHERE is_system = 1');
+  const systemWorkoutTemplates = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM workout_templates WHERE is_system = 1');
+  const systemDietPlans = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM diet_plans WHERE is_system = 1');
+  const systemRecipes = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM recipes WHERE is_system = 1');
+  const systemFoods = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM foods WHERE is_system = 1');
   
   res.json({ 
     totalUsers: users[0]?.count || 0, 
+    totalAdmins: admins[0]?.count || 0,
     totalCoaches: coaches[0]?.count || 0, 
     totalClients: clients[0]?.count || 0,
-    activeRelationships: activeRelationships[0]?.count || 0,
-    pendingRequests: pendingRequests[0]?.count || 0
+    activeCoachings: activeCoachings[0]?.count || 0,
+    pendingRequests: pendingRequests[0]?.count || 0,
+    systemExercises: systemExercises?.count || 0,
+    systemWorkoutTemplates: systemWorkoutTemplates?.count || 0,
+    systemDietPlans: systemDietPlans?.count || 0,
+    systemRecipes: systemRecipes?.count || 0,
+    systemFoods: systemFoods?.count || 0,
   });
 }));
 
@@ -35,18 +49,28 @@ router.get('/recent-activity', authenticate, requireSuperAdmin, asyncHandler(asy
   const newUsersWeek = await queryOne<{ count: number }>(
     `SELECT COUNT(*) as count FROM users WHERE created_at >= DATEADD(day, -7, GETUTCDATE())`
   );
-  const newCheckinsWeek = await queryOne<{ count: number }>(
-    `SELECT COUNT(*) as count FROM client_checkins WHERE created_at >= DATEADD(day, -7, GETUTCDATE())`
+  const checkinsMonth = await queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM client_checkins WHERE created_at >= DATEADD(day, -30, GETUTCDATE())`
   );
-  const newWorkoutsWeek = await queryOne<{ count: number }>(
-    `SELECT COUNT(*) as count FROM workout_logs WHERE created_at >= DATEADD(day, -7, GETUTCDATE())`
+  const workoutsMonth = await queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM workout_logs WHERE created_at >= DATEADD(day, -30, GETUTCDATE())`
+  );
+  
+  // Get top coach client count
+  const topCoach = await queryOne<{ client_count: number }>(
+    `SELECT TOP 1 COUNT(*) as client_count 
+     FROM coach_client_relationships 
+     WHERE status = 'active' 
+     GROUP BY coach_id 
+     ORDER BY client_count DESC`
   );
 
   res.json({
     newUsersToday: newUsersToday?.count || 0,
     newUsersWeek: newUsersWeek?.count || 0,
-    newCheckinsWeek: newCheckinsWeek?.count || 0,
-    newWorkoutsWeek: newWorkoutsWeek?.count || 0,
+    checkinsMonth: checkinsMonth?.count || 0,
+    workoutsMonth: workoutsMonth?.count || 0,
+    topCoachClientCount: topCoach?.client_count || 0,
   });
 }));
 
@@ -341,25 +365,58 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, asyncHandler(async (r
   const params: Record<string, unknown> = { limit: parseInt(limit as string), offset: parseInt(offset as string) };
   
   if (action_type) {
-    whereClause += ' AND action_type = @actionType';
+    whereClause += ' AND al.action_type = @actionType';
     params.actionType = action_type;
   }
   if (user_id) {
-    whereClause += ' AND admin_user_id = @userId';
+    whereClause += ' AND al.admin_user_id = @userId';
     params.userId = user_id;
   }
   
   const logs = await queryAll<Record<string, unknown>>(
-    `SELECT al.*, p.full_name as admin_name
+    `SELECT al.id, al.admin_user_id, al.action_type, al.target_user_id, 
+            al.target_resource_type, al.target_resource_id, al.details, al.ip_address, al.created_at,
+            p.full_name as admin_name, p.email as admin_email,
+            tp.full_name as target_name, tp.email as target_email
      FROM admin_audit_logs al
      LEFT JOIN profiles p ON al.admin_user_id = p.user_id
+     LEFT JOIN profiles tp ON al.target_user_id = tp.user_id
      ${whereClause}
      ORDER BY al.created_at DESC
      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,
     params
   );
   
-  res.json(logs);
+  // Reshape to match frontend expected format with nested profile objects
+  const reshaped = logs.map(log => {
+    // Parse JSON details field
+    let parsedDetails = log.details;
+    if (typeof log.details === 'string') {
+      try { parsedDetails = JSON.parse(log.details as string); } catch { parsedDetails = null; }
+    }
+    
+    return {
+      id: log.id,
+      admin_user_id: log.admin_user_id,
+      action_type: log.action_type,
+      target_user_id: log.target_user_id,
+      target_resource_type: log.target_resource_type,
+      target_resource_id: log.target_resource_id,
+      details: parsedDetails,
+      ip_address: log.ip_address,
+      created_at: log.created_at,
+      admin_profile: log.admin_name ? {
+        full_name: log.admin_name,
+        email: log.admin_email,
+      } : null,
+      target_profile: log.target_name ? {
+        full_name: log.target_name,
+        email: log.target_email,
+      } : null,
+    };
+  });
+  
+  res.json(reshaped);
 }));
 
 // ============ Pending Requests ============
@@ -382,15 +439,38 @@ router.get('/pending-requests', authenticate, requireSuperAdmin, asyncHandler(as
 
 router.get('/relationships', authenticate, requireSuperAdmin, asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
   const relationships = await queryAll<Record<string, unknown>>(
-    `SELECT ccr.id, ccr.status, ccr.started_at, ccr.ended_at, ccr.notes,
-            cp.full_name as client_name, cp.email as client_email, cp.user_id as client_id,
-            cop.full_name as coach_name, cop.email as coach_email, cop.user_id as coach_id
+    `SELECT ccr.id, ccr.status, ccr.started_at, ccr.ended_at, ccr.notes, ccr.created_at,
+            cp.full_name as client_name, cp.email as client_email, cp.user_id as client_id, cp.avatar_url as client_avatar,
+            cop.full_name as coach_name, cop.email as coach_email, cop.user_id as coach_id, cop.avatar_url as coach_avatar
      FROM coach_client_relationships ccr
      JOIN profiles cp ON ccr.client_id = cp.user_id
      JOIN profiles cop ON ccr.coach_id = cop.user_id
      ORDER BY ccr.created_at DESC`
   );
-  res.json(relationships);
+  
+  // Reshape to match frontend expected format with nested coach/client objects
+  const reshaped = relationships.map(r => ({
+    id: r.id,
+    status: r.status,
+    started_at: r.started_at,
+    ended_at: r.ended_at,
+    notes: r.notes,
+    created_at: r.created_at,
+    coach_id: r.coach_id,
+    client_id: r.client_id,
+    coach: {
+      full_name: r.coach_name,
+      email: r.coach_email,
+      avatar_url: r.coach_avatar,
+    },
+    client: {
+      full_name: r.client_name,
+      email: r.client_email,
+      avatar_url: r.client_avatar,
+    },
+  }));
+  
+  res.json(reshaped);
 }));
 
 // ============ Content Export/Import ============

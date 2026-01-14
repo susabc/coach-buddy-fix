@@ -140,6 +140,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
     default_serving_unit = 'g',
     image_url,
     notes,
+    is_system, // Allow super admin to set this
   } = req.body;
 
   if (!name || !category) {
@@ -147,6 +148,9 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
   }
 
   const id = uuidv4();
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  // Only super admins can create system foods
+  const systemFlag = isSuperAdmin && is_system ? 1 : 0;
 
   await execute(
     `INSERT INTO foods (id, name, brand, category, subcategory, barcode,
@@ -158,7 +162,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
              @caloriesPer100g, @proteinPer100g, @carbsPer100g, @fatPer100g,
              @fiberPer100g, @sugarPer100g, @sodiumMgPer100g,
              @defaultServingSize, @defaultServingUnit, @imageUrl, @notes,
-             0, @createdBy)`,
+             @isSystem, @createdBy)`,
     {
       id,
       name,
@@ -177,6 +181,7 @@ router.post('/', authenticate, asyncHandler(async (req: AuthenticatedRequest, re
       defaultServingUnit: default_serving_unit,
       imageUrl: image_url,
       notes,
+      isSystem: systemFlag,
       createdBy: req.user!.id,
     }
   );

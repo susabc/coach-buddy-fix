@@ -99,7 +99,7 @@ router.get('/templates/:id', optionalAuth, asyncHandler(async (req: Authenticate
         `SELECT wte.id, wte.order_index, wte.sets_min, wte.sets_max, 
                 wte.reps_min, wte.reps_max, wte.rest_seconds_min, wte.rest_seconds_max,
                 wte.notes, wte.custom_exercise_name, wte.exercise_id,
-                e.name as exercise_name, e.primary_muscle, e.equipment
+                e.name as exercise_name, e.primary_muscle, e.equipment, e.instructions
          FROM workout_template_exercises wte
          LEFT JOIN exercises e ON wte.exercise_id = e.id
          WHERE wte.day_id = @dayId
@@ -124,7 +124,7 @@ router.get('/templates/:id', optionalAuth, asyncHandler(async (req: Authenticate
       `SELECT wte.id, wte.order_index, wte.sets_min, wte.sets_max, 
               wte.reps_min, wte.reps_max, wte.rest_seconds_min, wte.rest_seconds_max,
               wte.notes, wte.custom_exercise_name, wte.exercise_id,
-              e.name as exercise_name, e.primary_muscle, e.equipment
+              e.name as exercise_name, e.primary_muscle, e.equipment, e.instructions
        FROM workout_template_exercises wte
        LEFT JOIN exercises e ON wte.exercise_id = e.id
        WHERE wte.day_id = @dayId
@@ -160,6 +160,7 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
     is_periodized = false,
     weeks,
     days,
+    is_system, // Allow super admin to set this
   } = req.body;
 
   if (!name) {
@@ -167,10 +168,13 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
   }
 
   const templateId = uuidv4();
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  // Only super admins can create system templates
+  const systemFlag = isSuperAdmin && is_system ? 1 : 0;
 
   await execute(
     `INSERT INTO workout_templates (id, name, description, difficulty, duration_weeks, days_per_week, goal, template_type, is_periodized, is_system, created_by)
-     VALUES (@id, @name, @description, @difficulty, @durationWeeks, @daysPerWeek, @goal, @templateType, @isPeriodized, 0, @createdBy)`,
+     VALUES (@id, @name, @description, @difficulty, @durationWeeks, @daysPerWeek, @goal, @templateType, @isPeriodized, @isSystem, @createdBy)`,
     {
       id: templateId,
       name,
@@ -181,6 +185,7 @@ router.post('/templates', authenticate, asyncHandler(async (req: AuthenticatedRe
       goal,
       templateType: template_type,
       isPeriodized: is_periodized ? 1 : 0,
+      isSystem: systemFlag,
       createdBy: req.user!.id,
     }
   );
@@ -999,12 +1004,15 @@ router.get('/logs/:id', authenticate, asyncHandler(async (req: AuthenticatedRequ
  *     summary: Create a workout log
  */
 router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  // Support both snake_case and camelCase parameter naming
+  const template_id = req.body.template_id || req.body.templateId;
+  const template_day_id = req.body.template_day_id || req.body.templateDayId;
+  const assignment_id = req.body.assignment_id || req.body.assignmentId;
+  const workout_date = req.body.workout_date || req.body.workoutDate;
+  const preload_exercises = req.body.preload_exercises ?? req.body.preloadExercises ?? true;
+  
   const {
-    template_id,
-    template_day_id,
-    assignment_id,
-    workout_date,
-    status = 'completed',
+    status = 'in_progress', // Default to in_progress for new workouts
     started_at,
     completed_at,
     duration_minutes,
@@ -1015,6 +1023,7 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
   } = req.body;
 
   const logId = uuidv4();
+  const now = new Date().toISOString();
 
   await execute(
     `INSERT INTO workout_logs (id, client_id, template_id, template_day_id, assignment_id, workout_date, status, started_at, completed_at, duration_minutes, notes, perceived_effort, satisfaction_rating)
@@ -1022,17 +1031,17 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
     {
       id: logId,
       clientId: req.user!.id,
-      templateId: template_id,
-      templateDayId: template_day_id,
-      assignmentId: assignment_id,
+      templateId: template_id || null,
+      templateDayId: template_day_id || null,
+      assignmentId: assignment_id || null,
       workoutDate: workout_date || new Date().toISOString().split('T')[0],
       status,
-      startedAt: started_at,
-      completedAt: completed_at,
-      durationMinutes: duration_minutes,
-      notes,
-      perceivedEffort: perceived_effort,
-      satisfactionRating: satisfaction_rating,
+      startedAt: started_at || (status === 'in_progress' ? now : null),
+      completedAt: completed_at || null,
+      durationMinutes: duration_minutes || null,
+      notes: notes || null,
+      perceivedEffort: perceived_effort || null,
+      satisfactionRating: satisfaction_rating || null,
     }
   );
 
@@ -1064,7 +1073,12 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
 // Add exercise to existing workout log
 router.post('/logs/:id/exercises', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { exercise_id, exercise_name, sets_completed, set_data, notes } = req.body;
+  // Support both snake_case and camelCase
+  const exercise_id = req.body.exercise_id || req.body.exerciseId;
+  const exercise_name = req.body.exercise_name || req.body.exerciseName;
+  const sets_completed = req.body.sets_completed || req.body.setsCompleted || 0;
+  const set_data = req.body.set_data || req.body.setData;
+  const notes = req.body.notes;
 
   const log = await queryOne<{ client_id: string }>(
     'SELECT client_id FROM workout_logs WHERE id = @id',
@@ -1085,33 +1099,92 @@ router.post('/logs/:id/exercises', authenticate, asyncHandler(async (req: Authen
     { logId: id }
   );
 
-  const exerciseId = uuidv4();
+  // Create default set data if not provided
+  const defaultSetData = set_data || [
+    { setNumber: 1, reps: 10, weight: 0, completed: false },
+    { setNumber: 2, reps: 10, weight: 0, completed: false },
+    { setNumber: 3, reps: 10, weight: 0, completed: false },
+  ];
+
+  const exerciseLogId = uuidv4();
   await execute(
     `INSERT INTO workout_log_exercises (id, workout_log_id, exercise_id, exercise_name, order_index, sets_completed, set_data, notes)
      VALUES (@id, @logId, @exerciseId, @exerciseName, @orderIndex, @setsCompleted, @setData, @notes)`,
     {
-      id: exerciseId,
+      id: exerciseLogId,
       logId: id,
-      exerciseId: exercise_id,
+      exerciseId: exercise_id || null,
       exerciseName: exercise_name,
       orderIndex: (maxOrder?.max_order ?? -1) + 1,
-      setsCompleted: sets_completed || 0,
-      setData: JSON.stringify(set_data || []),
-      notes,
+      setsCompleted: sets_completed,
+      setData: JSON.stringify(defaultSetData),
+      notes: notes || null,
     }
   );
 
-  const exercise = await queryOne<Record<string, unknown>>('SELECT * FROM workout_log_exercises WHERE id = @id', { id: exerciseId });
+  const exercise = await queryOne<Record<string, unknown>>('SELECT * FROM workout_log_exercises WHERE id = @id', { id: exerciseLogId });
   if (exercise) {
     transformRow(exercise, ['set_data']);
   }
   res.status(201).json(exercise);
 }));
 
+// Update workout log (status, completion, notes, etc.)
+router.put('/logs/:id', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  // Support both snake_case and camelCase
+  const status = req.body.status;
+  const completed_at = req.body.completed_at || req.body.completedAt;
+  const duration_minutes = req.body.duration_minutes ?? req.body.durationMinutes;
+  const notes = req.body.notes;
+  const perceived_effort = req.body.perceived_effort ?? req.body.perceivedEffort;
+  const satisfaction_rating = req.body.satisfaction_rating ?? req.body.satisfactionRating;
+
+  const log = await queryOne<{ client_id: string }>(
+    'SELECT client_id FROM workout_logs WHERE id = @id',
+    { id }
+  );
+
+  if (!log) {
+    throw NotFoundError('Workout log');
+  }
+
+  if (log.client_id !== req.user!.id && !req.user!.roles.includes('super_admin')) {
+    throw ForbiddenError('You can only edit your own workout logs');
+  }
+
+  await execute(
+    `UPDATE workout_logs SET
+       status = COALESCE(@status, status),
+       completed_at = COALESCE(@completedAt, completed_at),
+       duration_minutes = COALESCE(@durationMinutes, duration_minutes),
+       notes = COALESCE(@notes, notes),
+       perceived_effort = COALESCE(@perceivedEffort, perceived_effort),
+       satisfaction_rating = COALESCE(@satisfactionRating, satisfaction_rating),
+       updated_at = GETUTCDATE()
+     WHERE id = @id`,
+    {
+      id,
+      status,
+      completedAt: completed_at || null,
+      durationMinutes: duration_minutes ?? null,
+      notes: notes ?? null,
+      perceivedEffort: perceived_effort ?? null,
+      satisfactionRating: satisfaction_rating ?? null,
+    }
+  );
+
+  const updated = await queryOne('SELECT * FROM workout_logs WHERE id = @id', { id });
+  res.json(updated);
+}));
+
 // Update exercise in workout log
 router.put('/logs/exercises/:id', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { sets_completed, set_data, notes } = req.body;
+  // Support both snake_case and camelCase
+  const sets_completed = req.body.sets_completed ?? req.body.setsCompleted;
+  const set_data = req.body.set_data || req.body.setData;
+  const notes = req.body.notes;
 
   const exercise = await queryOne<{ workout_log_id: string }>(
     'SELECT workout_log_id FROM workout_log_exercises WHERE id = @id',
@@ -1150,6 +1223,30 @@ router.put('/logs/exercises/:id', authenticate, asyncHandler(async (req: Authent
     transformRow(updated, ['set_data']);
   }
   res.json(updated);
+}));
+
+// Delete workout log
+router.delete('/logs/:id', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+
+  const log = await queryOne<{ client_id: string }>(
+    'SELECT client_id FROM workout_logs WHERE id = @id',
+    { id }
+  );
+
+  if (!log) {
+    throw NotFoundError('Workout log');
+  }
+
+  if (log.client_id !== req.user!.id && !req.user!.roles.includes('super_admin')) {
+    throw ForbiddenError('You can only delete your own workout logs');
+  }
+
+  // Delete exercises first, then the log
+  await execute('DELETE FROM workout_log_exercises WHERE workout_log_id = @logId', { logId: id });
+  await execute('DELETE FROM workout_logs WHERE id = @id', { id });
+
+  res.json({ message: 'Workout log deleted' });
 }));
 
 export default router;

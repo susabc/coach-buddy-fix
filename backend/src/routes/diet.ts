@@ -121,6 +121,7 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
     goal,
     notes,
     meals,
+    is_system, // Allow super admin to set this
   } = req.body;
 
   if (!name) {
@@ -128,10 +129,13 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
   }
 
   const planId = uuidv4();
+  const isSuperAdmin = req.user!.roles.includes('super_admin');
+  // Only super admins can create system diet plans
+  const systemFlag = isSuperAdmin && is_system ? 1 : 0;
 
   await execute(
     `INSERT INTO diet_plans (id, name, description, calories_target, protein_grams, carbs_grams, fat_grams, meals_per_day, dietary_type, goal, notes, is_system, is_active, created_by)
-     VALUES (@id, @name, @description, @caloriesTarget, @proteinGrams, @carbsGrams, @fatGrams, @mealsPerDay, @dietaryType, @goal, @notes, 0, 1, @createdBy)`,
+     VALUES (@id, @name, @description, @caloriesTarget, @proteinGrams, @carbsGrams, @fatGrams, @mealsPerDay, @dietaryType, @goal, @notes, @isSystem, 1, @createdBy)`,
     {
       id: planId,
       name,
@@ -144,6 +148,7 @@ router.post('/plans', authenticate, asyncHandler(async (req: AuthenticatedReques
       dietaryType: dietary_type,
       goal,
       notes,
+      isSystem: systemFlag,
       createdBy: req.user!.id,
     }
   );

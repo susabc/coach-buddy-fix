@@ -98,12 +98,15 @@ export function WorkoutProgramEditor({ templateId, onClose }: WorkoutProgramEdit
   const [newWeekFocus, setNewWeekFocus] = useState("");
 
   // Fetch template structure
-  const { data: structure, isLoading } = useQuery({
+  const { data: structureData, isLoading } = useQuery({
     queryKey: ["template-structure", templateId],
     queryFn: async () => {
-      return api.get<Week[]>(`/api/workouts/templates/${templateId}/structure`);
+      const response = await api.get<{ weeks: Week[] }>(`/api/workouts/templates/${templateId}/structure`);
+      return response.weeks || [];
     },
   });
+
+  const structure = structureData || [];
 
   // Fetch exercises for search
   const { data: allExercises } = useExercises({
@@ -301,7 +304,7 @@ export function WorkoutProgramEditor({ templateId, onClose }: WorkoutProgramEdit
         </Button>
       </div>
 
-      {structure && structure.length > 0 ? (
+      {structure.length > 0 ? (
         <Accordion type="multiple" defaultValue={structure.map(w => w.id)} className="space-y-3">
           {structure.map((week) => (
             <AccordionItem

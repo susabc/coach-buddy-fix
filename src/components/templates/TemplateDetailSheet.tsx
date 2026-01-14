@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ExportPdfButton } from "@/components/shared/ExportPdfButton";
 import { WorkoutPlanPdf } from "@/components/pdf/WorkoutPlanPdf";
 import { WorkoutProgramEditor } from "./WorkoutProgramEditor";
+import { ExerciseDetailSheet } from "@/components/exercises/ExerciseDetailSheet";
 
 interface TemplateDetailSheetProps {
   templateId: string | null;
@@ -67,6 +68,7 @@ const typeColors: Record<string, string> = {
 export function TemplateDetailSheet({ templateId, open, onOpenChange }: TemplateDetailSheetProps) {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const { data: template, isLoading } = useWorkoutTemplateDetail(templateId);
   const startProgram = useStartProgram();
 
@@ -214,10 +216,14 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
                               name: d.name,
                               dayNumber: d.day_number,
                               exercises: d.exercises.map(e => ({
-                                name: e.exercise?.name || e.custom_exercise_name || "Unknown",
+                                name: e.exercise_name || e.exercise?.name || e.custom_exercise_name || "Custom Exercise",
                                 sets: `${e.sets_min}${e.sets_max && e.sets_max !== e.sets_min ? `-${e.sets_max}` : ""}`,
                                 reps: `${e.reps_min}${e.reps_max && e.reps_max !== e.reps_min ? `-${e.reps_max}` : ""}`,
                                 notes: e.notes || undefined,
+                                instructions: e.exercise?.instructions?.join('. ') || undefined,
+                                muscleGroup: e.primary_muscle || e.exercise?.primary_muscle || undefined,
+                                equipment: e.equipment || e.exercise?.equipment || undefined,
+                                restTime: e.rest_seconds_min ? `${e.rest_seconds_min}${e.rest_seconds_max ? `-${e.rest_seconds_max}` : ""}s` : undefined,
                               })),
                               notes: d.notes || undefined,
                             })),
@@ -284,20 +290,26 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
                                   {day.exercises.length > 0 && (
                                     <div className="space-y-1.5 mt-3">
                                       {day.exercises.map((ex, exIndex) => (
-                                        <div 
+                                        <button 
                                           key={ex.id}
-                                          className="flex items-center gap-3 text-sm"
+                                          className="flex items-center gap-3 text-sm w-full p-1.5 rounded hover:bg-muted/50 transition-colors text-left"
+                                          onClick={() => {
+                                            if (ex.exercise_id) {
+                                              setSelectedExerciseId(ex.exercise_id);
+                                            }
+                                          }}
                                         >
                                           <span className="text-muted-foreground w-4 text-right">
                                             {exIndex + 1}.
                                           </span>
-                                          <span className="flex-1 truncate">
-                                            {ex.exercise?.name || ex.custom_exercise_name || "Unknown"}
+                                          <Dumbbell className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                          <span className="flex-1 truncate font-medium">
+                                            {ex.exercise?.name || ex.exercise_name || ex.custom_exercise_name || "Custom Exercise"}
                                           </span>
                                           <span className="text-muted-foreground text-xs whitespace-nowrap">
                                             {ex.sets_min}{ex.sets_max && ex.sets_max !== ex.sets_min ? `-${ex.sets_max}` : ""} × {ex.reps_min}{ex.reps_max && ex.reps_max !== ex.reps_min ? `-${ex.reps_max}` : ""}
                                           </span>
-                                        </div>
+                                        </button>
                                       ))}
                                     </div>
                                   )}
@@ -330,6 +342,13 @@ export function TemplateDetailSheet({ templateId, open, onOpenChange }: Template
             )}
           </div>
         </ScrollArea>
+        
+        {/* Exercise Detail Sheet */}
+        <ExerciseDetailSheet
+          exerciseId={selectedExerciseId}
+          open={!!selectedExerciseId}
+          onOpenChange={(open) => !open && setSelectedExerciseId(null)}
+        />
       </SheetContent>
     </Sheet>
   );

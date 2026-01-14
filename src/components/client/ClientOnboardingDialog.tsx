@@ -203,29 +203,6 @@ export function ClientOnboardingDialog({ open, onOpenChange, onComplete }: Clien
                     onChange={(e) => updateField("dateOfBirth", e.target.value)}
                     className="flex-1"
                   />
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="icon" type="button">
-                        <CalendarIcon className="h-4 w-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="end">
-                      <Calendar
-                        mode="single"
-                        selected={formData.dateOfBirth ? parse(formData.dateOfBirth, 'yyyy-MM-dd', new Date()) : undefined}
-                        onSelect={(date) => {
-                          if (date) {
-                            updateField("dateOfBirth", format(date, 'yyyy-MM-dd'));
-                          }
-                        }}
-                        initialFocus
-                        captionLayout="dropdown-buttons"
-                        fromYear={1940}
-                        toYear={new Date().getFullYear() - 10}
-                        className={cn("p-3 pointer-events-auto")}
-                      />
-                    </PopoverContent>
-                  </Popover>
                 </div>
               </div>
 
@@ -334,7 +311,9 @@ export function ClientOnboardingDialog({ open, onOpenChange, onComplete }: Clien
                   className="mt-2 space-y-2"
                 >
                   {FITNESS_LEVELS.map((level) => (
-                    <div key={level.value} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer">
+                    <div key={level.value} className="flex items-start gap-3 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
+                    onClick={() => updateField("fitnessLevel", level.value)}
+                    >
                       <RadioGroupItem value={level.value} id={level.value} className="mt-0.5" />
                       <div>
                         <Label htmlFor={level.value} className="text-sm font-medium cursor-pointer">{level.label}</Label>

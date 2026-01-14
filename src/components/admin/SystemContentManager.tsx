@@ -315,7 +315,7 @@ function WorkoutsTab() {
             <CardTitle>System Workout Templates</CardTitle>
             <CardDescription>Manage platform-wide workout programs</CardDescription>
           </div>
-          <CreateWorkoutTemplateDialog />
+          <CreateWorkoutTemplateDialog isSystemContent={true} />
         </div>
       </CardHeader>
       <CardContent>
@@ -361,7 +361,7 @@ function WorkoutsTab() {
       </CardContent>
       
       <TemplateDetailSheet templateId={selectedTemplateId} open={sheetOpen} onOpenChange={setSheetOpen} />
-      <CreateWorkoutTemplateDialog initialData={editingTemplate} open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setEditingTemplate(null); }} />
+      <CreateWorkoutTemplateDialog initialData={editingTemplate} open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setEditingTemplate(null); }} isSystemContent={true} />
     </Card>
   );
 }
@@ -430,7 +430,7 @@ function DietsTab() {
             <CardDescription>Manage platform-wide diet plans</CardDescription>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="w-4 h-4 mr-2" />Add Plan</Button>
-          <CreateDietPlanDialog open={showCreate} onOpenChange={setShowCreate} />
+          <CreateDietPlanDialog open={showCreate} onOpenChange={setShowCreate} isSystemContent={true} />
         </div>
       </CardHeader>
       <CardContent>
@@ -480,6 +480,7 @@ function DietsTab() {
         open={!!editingPlanId} 
         onOpenChange={(open) => { if (!open) setEditingPlanId(null); }} 
         editingPlan={editingPlan || null}
+        isSystemContent={true}
       />
     </Card>
   );
@@ -548,7 +549,7 @@ function RecipesTab() {
             <CardDescription>Manage platform-wide recipe library</CardDescription>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="w-4 h-4 mr-2" />Add Recipe</Button>
-          <RecipeBuilderDialog open={showCreate} onOpenChange={setShowCreate} />
+          <RecipeBuilderDialog open={showCreate} onOpenChange={setShowCreate} isSystemContent={true} />
         </div>
       </CardHeader>
       <CardContent>
@@ -598,6 +599,7 @@ function RecipesTab() {
         open={!!editingRecipeId} 
         onOpenChange={(open) => { if (!open) setEditingRecipeId(null); }} 
         editingRecipe={editingRecipe || null}
+        isSystemContent={true}
       />
     </Card>
   );
@@ -660,7 +662,7 @@ function FoodsTab() {
             <CardTitle>System Foods</CardTitle>
             <CardDescription>Manage platform-wide food database</CardDescription>
           </div>
-          <CustomFoodDialog />
+          <CustomFoodDialog isSystemContent={true} />
         </div>
       </CardHeader>
       <CardContent>

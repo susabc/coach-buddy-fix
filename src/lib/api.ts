@@ -267,7 +267,11 @@ export interface WorkoutExercise {
     primary_muscle: string;
     equipment: string;
     difficulty: string;
+    instructions?: string[];
   };
+  // Fields from joined exercise data (flat from backend)
+  primary_muscle?: string;
+  equipment?: string;
 }
 
 export interface Food {

@@ -72,31 +72,37 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
 
   const { full_name, bio, phone, avatar_url } = profile;
 
-  // Update coach_profiles
+  // Upsert coach_profiles using MERGE
   await execute(
-    `UPDATE coach_profiles SET
-       specializations = COALESCE(@specializations, specializations),
-       certifications = COALESCE(@certifications, certifications),
-       experience_years = COALESCE(@experienceYears, experience_years),
-       hourly_rate = COALESCE(@hourlyRate, hourly_rate),
-       currency = COALESCE(@currency, currency),
-       max_clients = COALESCE(@maxClients, max_clients),
-       is_accepting_clients = COALESCE(@isAccepting, is_accepting_clients),
-       email_checkin_received = COALESCE(@emailCheckin, email_checkin_received),
-       email_plan_assigned = COALESCE(@emailPlan, email_plan_assigned),
-       updated_at = GETUTCDATE()
-     WHERE user_id = @userId`,
+    `MERGE coach_profiles AS target
+     USING (SELECT @userId AS user_id) AS source
+     ON target.user_id = source.user_id
+     WHEN MATCHED THEN
+       UPDATE SET
+         specializations = COALESCE(@specializations, target.specializations),
+         certifications = COALESCE(@certifications, target.certifications),
+         experience_years = COALESCE(@experienceYears, target.experience_years),
+         hourly_rate = COALESCE(@hourlyRate, target.hourly_rate),
+         currency = COALESCE(@currency, target.currency),
+         max_clients = COALESCE(@maxClients, target.max_clients),
+         is_accepting_clients = COALESCE(@isAccepting, target.is_accepting_clients),
+         email_checkin_received = COALESCE(@emailCheckin, target.email_checkin_received),
+         email_plan_assigned = COALESCE(@emailPlan, target.email_plan_assigned),
+         updated_at = GETUTCDATE()
+     WHEN NOT MATCHED THEN
+       INSERT (id, user_id, specializations, certifications, experience_years, hourly_rate, currency, max_clients, is_accepting_clients, email_checkin_received, email_plan_assigned, created_at, updated_at)
+       VALUES (NEWID(), @userId, @specializations, @certifications, @experienceYears, @hourlyRate, COALESCE(@currency, 'USD'), COALESCE(@maxClients, 50), COALESCE(@isAccepting, 1), COALESCE(@emailCheckin, 1), COALESCE(@emailPlan, 1), GETUTCDATE(), GETUTCDATE());`,
     {
       userId: req.user!.id,
       specializations: specializations ? JSON.stringify(specializations) : null,
       certifications: certifications ? JSON.stringify(certifications) : null,
-      experienceYears: experience_years,
-      hourlyRate: hourly_rate,
-      currency,
-      maxClients: max_clients,
-      isAccepting: is_accepting_clients,
-      emailCheckin: email_checkin_received,
-      emailPlan: email_plan_assigned,
+      experienceYears: experience_years ?? null,
+      hourlyRate: hourly_rate ?? null,
+      currency: currency ?? null,
+      maxClients: max_clients ?? null,
+      isAccepting: is_accepting_clients ?? null,
+      emailCheckin: email_checkin_received ?? null,
+      emailPlan: email_plan_assigned ?? null,
     }
   );
 
@@ -122,10 +128,12 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
 // Get all clients for coach
 router.get('/clients', authenticate, requireCoach, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const clients = await queryAll<Record<string, unknown>>(
-    `SELECT ccr.id as relationship_id, ccr.status, ccr.started_at, 
-            p.user_id as client_id, p.full_name, p.email, p.avatar_url,
-            cp.fitness_level, cp.current_weight_kg, cp.target_weight_kg,
-            cp.fitness_goals, cp.dietary_restrictions
+    `SELECT ccr.id as relationship_id, ccr.status, ccr.started_at, ccr.notes,
+            p.user_id as client_id, p.full_name, p.email, p.avatar_url, p.bio, p.phone,
+            p.date_of_birth, p.gender,
+            cp.fitness_level, cp.current_weight_kg, cp.target_weight_kg, cp.height_cm,
+            cp.fitness_goals, cp.dietary_restrictions, cp.medical_conditions,
+            cp.subscription_status
      FROM coach_client_relationships ccr
      JOIN profiles p ON ccr.client_id = p.user_id
      LEFT JOIN client_profiles cp ON ccr.client_id = cp.user_id
@@ -134,8 +142,49 @@ router.get('/clients', authenticate, requireCoach, asyncHandler(async (req: Auth
     { coachId: req.user!.id }
   );
 
-  transformRows(clients, ['fitness_goals', 'dietary_restrictions']);
-  res.json(clients);
+  // Reshape to nested format expected by frontend
+  const reshaped = clients.map(c => {
+    // Parse JSON fields before reshaping
+    const fitnessGoals = c.fitness_goals ? 
+      (typeof c.fitness_goals === 'string' ? 
+        (() => { try { return JSON.parse(c.fitness_goals as string); } catch { return []; } })() 
+        : c.fitness_goals) 
+      : [];
+    const dietaryRestrictions = c.dietary_restrictions ? 
+      (typeof c.dietary_restrictions === 'string' ? 
+        (() => { try { return JSON.parse(c.dietary_restrictions as string); } catch { return []; } })() 
+        : c.dietary_restrictions) 
+      : [];
+
+    return {
+      id: c.relationship_id,
+      client_id: c.client_id,
+      status: c.status,
+      started_at: c.started_at,
+      notes: c.notes,
+      profile: {
+        full_name: c.full_name,
+        email: c.email,
+        avatar_url: c.avatar_url,
+        bio: c.bio,
+        phone: c.phone,
+        date_of_birth: c.date_of_birth,
+        gender: c.gender,
+      },
+      client_profile: {
+        height_cm: c.height_cm,
+        current_weight_kg: c.current_weight_kg,
+        target_weight_kg: c.target_weight_kg,
+        fitness_level: c.fitness_level,
+        fitness_goals: Array.isArray(fitnessGoals) ? fitnessGoals : [],
+        dietary_restrictions: Array.isArray(dietaryRestrictions) ? dietaryRestrictions : [],
+        medical_conditions: c.medical_conditions,
+        subscription_status: c.subscription_status,
+      }
+    };
+  });
+  
+  res.json(reshaped);
 }));
 
 // Get single client detail
@@ -250,14 +299,32 @@ router.get('/marketplace', asyncHandler(async (req: AuthenticatedRequest, res: R
     params
   );
 
+  // Transform JSON fields to arrays - ensure they are always arrays
   transformRows(coaches, ['specializations', 'certifications']);
+  
+  // Reshape data to include profile object that frontend expects
+  const reshapedCoaches = coaches.map(c => ({
+    user_id: c.user_id,
+    specializations: Array.isArray(c.specializations) ? c.specializations : [],
+    certifications: Array.isArray(c.certifications) ? c.certifications : [],
+    experience_years: c.experience_years,
+    hourly_rate: c.hourly_rate,
+    currency: c.currency,
+    rating: c.rating,
+    total_reviews: c.total_reviews,
+    is_accepting_clients: c.is_accepting_clients,
+    profile: {
+      full_name: c.full_name,
+      avatar_url: c.avatar_url,
+      bio: c.bio,
+    },
+  }));
 
   // Filter by specialization after parsing (since it's stored as JSON)
-  let filteredCoaches: Record<string, unknown>[] = coaches;
+  let filteredCoaches = reshapedCoaches;
   if (specialization) {
-    filteredCoaches = coaches.filter((c) => {
-      const specs = c.specializations as string[];
-      return specs && specs.includes(specialization as string);
+    filteredCoaches = reshapedCoaches.filter((c) => {
+      return c.specializations && c.specializations.includes(specialization as string);
     });
   }
 
@@ -327,7 +394,9 @@ router.get('/requests/my', authenticate, asyncHandler(async (req: AuthenticatedR
 
 // Send coaching request (as client)
 router.post('/requests', authenticate, asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { coach_id, message } = req.body;
+  // Support both snake_case (coach_id) and camelCase (coachId) from frontend
+  const coach_id = req.body.coach_id || req.body.coachId;
+  const { message } = req.body;
 
   if (!coach_id) {
     throw BadRequestError('Coach ID is required');
