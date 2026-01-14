@@ -14,7 +14,7 @@ router.get('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
   const data = await queryOne<Record<string, unknown>>(
     `SELECT cp.*, p.full_name, p.email, p.avatar_url, p.bio, p.phone
      FROM coach_profiles cp
-     JOIN profiles p ON cp.user_id = p.user_id
+     LEFT JOIN profiles p ON cp.user_id = p.user_id
      WHERE cp.user_id = @userId`,
     { userId: req.user!.id }
   );
@@ -113,17 +113,34 @@ router.put('/settings', authenticate, requireCoach, asyncHandler(async (req: Aut
     }
   );
 
-  // Update profiles table with full_name, bio, phone, avatar_url
+  // Upsert profiles table with full_name, bio, phone, avatar_url
+  // (Some users may not yet have a profiles row; UPDATE would silently affect 0 rows.)
   if (full_name !== undefined || bio !== undefined || phone !== undefined || avatar_url !== undefined) {
     await execute(
-      `UPDATE profiles SET
-         full_name = COALESCE(@fullName, full_name),
-         bio = COALESCE(@bio, bio),
-         phone = COALESCE(@phone, phone),
-         avatar_url = COALESCE(@avatarUrl, avatar_url),
-         updated_at = GETUTCDATE()
-       WHERE user_id = @userId`,
-      { userId: req.user!.id, fullName: full_name, bio, phone, avatarUrl: avatar_url }
+      `MERGE profiles AS target
+       USING (SELECT @userId AS user_id) AS source
+       ON target.user_id = source.user_id
+       WHEN MATCHED THEN
+         UPDATE SET
+           full_name = CASE WHEN @fullNameProvided = 1 THEN @fullName ELSE target.full_name END,
+           bio = CASE WHEN @bioProvided = 1 THEN @bio ELSE target.bio END,
+           phone = CASE WHEN @phoneProvided = 1 THEN @phone ELSE target.phone END,
+           avatar_url = CASE WHEN @avatarUrlProvided = 1 THEN @avatarUrl ELSE target.avatar_url END,
+           updated_at = GETUTCDATE()
+       WHEN NOT MATCHED THEN
+         INSERT (id, user_id, full_name, email, avatar_url, bio, phone, created_at, updated_at)
+         VALUES (NEWID(), @userId, COALESCE(@fullName, ''), '', @avatarUrl, @bio, @phone, GETUTCDATE(), GETUTCDATE());`,
+      {
+        userId: req.user!.id,
+        fullName: full_name ?? null,
+        bio: bio ?? null,
+        phone: phone ?? null,
+        avatarUrl: avatar_url ?? null,
+        fullNameProvided: full_name !== undefined ? 1 : 0,
+        bioProvided: bio !== undefined ? 1 : 0,
+        phoneProvided: phone !== undefined ? 1 : 0,
+        avatarUrlProvided: avatar_url !== undefined ? 1 : 0,
+      }
     );
   }
 

@@ -1152,7 +1152,7 @@ router.post('/logs', authenticate, asyncHandler(async (req: AuthenticatedRequest
         const day = await queryOne<{ id: string }>(
           `SELECT TOP 1 id FROM workout_template_days 
            WHERE template_id = @templateId AND day_number = @dayNumber
-           ORDER BY week_id NULLS FIRST`,
+           ORDER BY CASE WHEN week_id IS NULL THEN 0 ELSE 1 END, week_id`,
           { templateId: template_id, dayNumber }
         );
         
